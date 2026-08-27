@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Yellowstone Unit — Ashley National Forest</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<style>
+  :root{
+    --ink:#1c2318;
+    --paper:#f2efe4;
+    --line:#3f4a34;
+    --accent:#a8431f;
+    --accent2:#4f6b3a;
+    --panel:#eae5d3;
+    --muted:#6b6a5c;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;font-family:'Courier New',monospace;background:var(--ink);color:var(--paper);}
+  #app{display:flex;height:100%;}
+  #sidebar{
+    width:300px;min-width:300px;background:var(--ink);border-right:2px solid var(--accent);
+    display:flex;flex-direction:column;overflow-y:auto;
+  }
+  #sidebar h1{
+    font-size:15px;letter-spacing:1px;text-transform:uppercase;margin:0;padding:16px 16px 4px;color:var(--paper);
+    border-bottom:1px solid #3a4230;
+  }
+  #sidebar .sub{padding:0 16px 14px;font-size:11px;color:#9a9a86;border-bottom:1px solid #3a4230;line-height:1.5;}
+  .group{padding:12px 16px;border-bottom:1px solid #3a4230;}
+  .group h2{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);margin:0 0 8px;}
+  .layer-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:#d8d6c4;cursor:pointer;}
+  .layer-row input{accent-color:var(--accent);}
+  .swatch{width:12px;height:12px;flex-shrink:0;border:1px solid #555;}
+  .status{font-size:10px;color:var(--muted);padding-left:20px;margin-top:-2px;}
+  .status.ok{color:#7a9e5f;}
+  .status.err{color:#c25b3f;}
+  #legend{padding:12px 16px;font-size:11px;color:#b9b7a4;line-height:1.6;}
+  #legend .k{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:middle;}
+  #map{flex:1;background:#1c2318;}
+  .leaflet-popup-content{font-family:'Courier New',monospace;font-size:12px;}
+  #loading{
+    position:absolute;top:12px;left:316px;background:rgba(28,35,24,0.9);color:var(--paper);
+    padding:6px 12px;font-size:11px;border:1px solid var(--accent);display:none;z-index:1000;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <h1>Yellowstone Unit</h1>
+    <div class="sub">South Slope / Ashley National Forest — Duchesne &amp; Uintah Co., Utah. Boundaries and land data pulled live from Utah DWR, USFS and BLM public GIS services.</div>
+
+    <div class="group">
+      <h2>Boundaries</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-ashley" checked><span class="swatch" style="background:none;border-color:#4f6b3a;border-width:2px;"></span>Ashley National Forest</div>
+      <div class="status" id="status-ashley">loading…</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-hunt" checked><span class="swatch" style="background:none;border-color:#a8431f;border-width:2px;border-style:dashed;"></span>Yellowstone Hunt Unit</div>
+      <div class="status" id="status-hunt">loading…</div>
+    </div>
+
+    <div class="group">
+      <h2>Land</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-owner"><span class="swatch" style="background:#d9c98a;"></span>Public Land Ownership (BLM/USFS)</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-hydro"><span class="swatch" style="background:#5a8fae;"></span>Streams &amp; Water Bodies</div>
+    </div>
+
+    <div class="group">
+      <h2>Terrain</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-hillshade" checked><span class="swatch" style="background:#888;"></span>Hillshade</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-slope"><span class="swatch" style="background:linear-gradient(90deg,#2b7a2b,#e8d34a,#c23f3f);"></span>Slope Angle</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-aspect"><span class="swatch" style="background:conic-gradient(red,orange,yellow,green,cyan,blue,magenta,red);"></span>Slope Aspect</div>
+    </div>
+
+    <div class="group">
+      <h2>Vegetation</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-evt"><span class="swatch" style="background:#5a7d3a;"></span>Vegetation Type (LANDFIRE)</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-evc"><span class="swatch" style="background:#345c22;"></span>Canopy Cover % (LANDFIRE)</div>
+    </div>
+
+    <div class="group">
+      <h2>Roads, Trails &amp; Remoteness</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-roads" checked><span class="swatch" style="background:none;border-color:#9b6f3f;border-width:2px;"></span>Roads (USFS)</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-trails" checked><span class="swatch" style="background:none;border-color:#5a8fae;border-width:2px;"></span>Trails (USFS)</div>
+      <div class="status" id="status-roads">not loaded yet</div>
+      <button id="btn-remote" style="margin-top:8px;width:100%;padding:7px;background:var(--accent);color:#fff;border:none;font-family:inherit;font-size:11px;letter-spacing:0.5px;cursor:pointer;">COMPUTE 1-MILE REMOTE ZONE</button>
+      <div class="status" id="status-remote"></div>
+      <div class="layer-row" id="row-remote" style="display:none;"><input type="checkbox" id="toggle-remote" checked><span class="swatch" style="background:#7a4fae;opacity:0.5;"></span>&gt;1 mi from all roads/trails</div>
+    </div>
+
+    <div class="group">
+      <h2>Disturbance History</h2>
+      <div class="layer-row"><input type="checkbox" id="toggle-fire"><span class="swatch" style="background:none;border-color:#c25b3f;border-width:2px;"></span>Fire History (perimeters)</div>
+      <div class="layer-row"><input type="checkbox" id="toggle-logging"><span class="swatch" style="background:none;border-color:#8a6a3a;border-width:2px;"></span>Timber Harvest History</div>
+      <div class="status" id="status-disturbance"></div>
+    </div>
+
+    <div class="group">
+      <h2>Water Proximity</h2>
+      <button id="btn-water" style="width:100%;padding:7px;background:var(--accent2);color:#fff;border:none;font-family:inherit;font-size:11px;letter-spacing:0.5px;cursor:pointer;">HIGHLIGHT WITHIN 0.5 MI OF WATER</button>
+      <div class="status" id="status-water"></div>
+      <div class="layer-row" id="row-water" style="display:none;"><input type="checkbox" id="toggle-waterzone" checked><span class="swatch" style="background:#3f7ba8;opacity:0.5;"></span>Within 0.5 mi of water</div>
+    </div>
+
+    <div class="group">
+      <h2>Moisture (Drought Context)</h2>
+      <div class="status" id="status-drought">loading county drought status…</div>
+    </div>
+
+    <div class="group" style="border-bottom:2px solid var(--accent);">
+      <h2 style="color:#e8b84a;">Elk Recommendation Engine</h2>
+      <div class="sub" style="padding:0 0 8px;border:none;">Samples ~80–120 points across the unit. Scores each on remoteness, terrain, aspect, canopy edge, and water — using general elk-ecology principles, not a proprietary model. Treat this as a data-informed starting point, not a guarantee.</div>
+      <button id="btn-analyze" style="width:100%;padding:8px;background:#e8b84a;color:#1c2318;font-weight:bold;border:none;font-family:inherit;font-size:11px;letter-spacing:0.5px;cursor:pointer;">RUN ANALYSIS FOR SEP 11–16</button>
+      <div class="status" id="status-analysis"></div>
+    </div>
+
+    <div class="group">
+      <h2>Base Map</h2>
+      <div class="layer-row"><input type="radio" name="base" id="base-topo" checked>USGS Topo (contours)</div>
+      <div class="layer-row"><input type="radio" name="base" id="base-imagery">Satellite Imagery</div>
+    </div>
+
+    <div id="legend">
+      <strong style="color:var(--accent2)">Reading this map</strong><br>
+      Slope: green = flat, yellow = moderate, red = steep (Esri default ramp). Aspect: color wheel = compass direction the slope faces, gray = flat.<br>
+      Ownership: USFS = light green, BLM = tan, private/other = white.<br><br>
+      <strong style="color:var(--accent2)">Not included</strong><br>
+      Meadows/openings can be read from Vegetation Type (herbaceous = open). Bench topography and beetle-kill staging aren't available as live public GIS layers, so they aren't modeled here — read those off the slope + hillshade + imagery by eye.<br><br>
+      All layers pulled live from USGS/USFS/BLM/NIFC/LANDFIRE public services — no proprietary scoring included.
+    </div>
+  </div>
+  <div id="results-panel" style="display:none;width:360px;min-width:360px;background:#161c12;border-left:2px solid #e8b84a;overflow-y:auto;padding:14px;font-size:12px;color:#d8d6c4;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <strong style="color:#e8b84a;font-size:13px;letter-spacing:0.5px;">RECOMMENDATIONS</strong>
+      <span id="close-results" style="cursor:pointer;color:#9a9a86;font-size:16px;">&times;</span>
+    </div>
+    <div id="results-body"></div>
+  </div>
+  <div id="map"></div>
+  <div id="loading">Fetching live boundary data…</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script>
+// ---- Generic ArcGIS ImageServer tile layer (exportImage per tile, on-the-fly rendering rules) ----
+const originShift = 20037508.342789244;
+const initRes = 2 * Math.PI * 6378137 / 256;
+function tileBBoxMerc(x, y, z){
+  const n = Math.pow(2, z);
+  const res = initRes / n;
+  const minx = x * 256 * res - originShift;
+  const maxx = (x + 1) * 256 * res - originShift;
+  const maxy = originShift - y * 256 * res;
+  const miny = originShift - (y + 1) * 256 * res;
+  return [minx, miny, maxx, maxy];
+}
+const ImageServerTileLayer = L.TileLayer.extend({
+  initialize: function(baseUrl, opts){
+    this._base = baseUrl;
+    this._rule = opts && opts.renderingRule ? opts.renderingRule : null;
+    L.TileLayer.prototype.initialize.call(this, '', opts);
+  },
+  getTileUrl: function(coords){
+    const [minx, miny, maxx, maxy] = tileBBoxMerc(coords.x, coords.y, coords.z);
+    let url = this._base + '/exportImage?bbox=' + [minx,miny,maxx,maxy].join(',') +
+      '&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&interpolation=RSP_BilinearInterpolation&f=image';
+    if (this._rule) url += '&renderingRule=' + encodeURIComponent(JSON.stringify(this._rule));
+    return url;
+  }
+});
+const map = L.map('map', {zoomControl:true}).setView([40.55, -110.35], 10);
+
+// ---- Normalize mixed LineString/MultiLineString/Polygon input before combine() ----
+// ArcGIS often exports a single road/trail record with multiple disconnected
+// segments as a MultiLineString; turf.combine() chokes on a mix of LineString
+// and MultiLineString in the same collection, so split everything to plain LineStrings first.
+function normalizeLines(features){
+  const out = [];
+  (features||[]).forEach(f=>{
+    if(!f || !f.geometry) return;
+    const t = f.geometry.type;
+    if(t==='LineString' && f.geometry.coordinates && f.geometry.coordinates.length>1){
+      out.push({type:'Feature',properties:{},geometry:f.geometry});
+    } else if(t==='MultiLineString'){
+      (f.geometry.coordinates||[]).forEach(coords=>{
+        if(coords && coords.length>1) out.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:coords}});
+      });
+    }
+  });
+  return out;
+}
+function normalizePolygonsToLines(features){
+  const polys = [];
+  (features||[]).forEach(f=>{
+    if(!f || !f.geometry) return;
+    const t = f.geometry.type;
+    if(t==='Polygon'){ polys.push({type:'Feature',properties:{},geometry:f.geometry}); }
+    else if(t==='MultiPolygon'){
+      (f.geometry.coordinates||[]).forEach(coords=>{
+        polys.push({type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:coords}});
+      });
+    }
+  });
+  const lines = [];
+  polys.forEach(p=>{
+    try{ lines.push(turf.polygonToLine(p)); }catch(e){}
+  });
+  const flat = [];
+  lines.forEach(l=>{
+    if(l.geometry.type==='LineString') flat.push(l);
+    else if(l.geometry.type==='MultiLineString') (l.geometry.coordinates||[]).forEach(c=>flat.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:c}}));
+  });
+  return normalizeLines(flat);
+}
+function combineLines(features){
+  const norm = normalizeLines(features);
+  if(!norm.length) return null;
+  try{
+    const combined = turf.combine({type:'FeatureCollection', features: norm});
+    // turf.combine returns a FeatureCollection wrapping the merged geometry —
+    // unwrap it so callers (buffer, pointToLineDistance, etc.) get a bare Feature.
+    if(combined && combined.type==='FeatureCollection' && combined.features && combined.features.length){
+      return combined.features[0];
+    }
+    return (combined && combined.geometry) ? combined : null;
+  }catch(e){ return null; }
+}
+
+// ---- Base layers ----
+const topo = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom:16, attribution:'USGS National Map'
+}).addTo(map);
+
+const imagery = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom:16, attribution:'USGS Imagery'
+});
+
+const hillshade = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom:16, opacity:0.45
+}).addTo(map);
+
+const hydro = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom:16, opacity:0.8
+});
+
+const ownership = L.tileLayer('https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom:14, opacity:0.45
+});
+
+document.getElementById('base-topo').addEventListener('change', ()=>{ map.removeLayer(imagery); map.addLayer(topo); });
+document.getElementById('base-imagery').addEventListener('change', ()=>{ map.removeLayer(topo); map.addLayer(imagery); });
+document.getElementById('toggle-hillshade').addEventListener('change', e=> e.target.checked ? hillshade.addTo(map) : map.removeLayer(hillshade));
+document.getElementById('toggle-hydro').addEventListener('change', e=> e.target.checked ? hydro.addTo(map) : map.removeLayer(hydro));
+document.getElementById('toggle-owner').addEventListener('change', e=> e.target.checked ? ownership.addTo(map) : map.removeLayer(ownership));
+
+// ---- Live boundary fetches ----
+const loading = document.getElementById('loading');
+loading.style.display = 'block';
+
+let ashleyLayer, huntLayer;
+let pending = 2;
+function done(){ pending--; if(pending<=0) loading.style.display='none'; }
+
+// Ashley National Forest boundary (USFS EDW)
+fetch("https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/1/query?where=forestname+LIKE+'%25Ashley%25'&outFields=*&outSR=4326&f=geojson")
+  .then(r=>r.json())
+  .then(data=>{
+    if(!data.features || !data.features.length) throw new Error('no features');
+    ashleyLayer = L.geoJSON(data, {
+      style:{color:'#4f6b3a', weight:2.5, fill:false, dashArray:null}
+    }).bindTooltip(f=>f.feature.properties.forestname || 'Ashley National Forest');
+    ashleyLayer.eachLayer(l=>l.bindPopup('<b>'+ (l.feature.properties.forestname||'Ashley NF') +'</b><br>GIS acres: '+ Math.round(l.feature.properties.gis_acres).toLocaleString()));
+    if(document.getElementById('toggle-ashley').checked) ashleyLayer.addTo(map);
+    document.getElementById('status-ashley').textContent = 'loaded from USFS EDW';
+    document.getElementById('status-ashley').className = 'status ok';
+    map.fitBounds(ashleyLayer.getBounds(), {padding:[20,20]});
+  })
+  .catch(err=>{
+    document.getElementById('status-ashley').textContent = 'could not load (' + err.message + ')';
+    document.getElementById('status-ashley').className = 'status err';
+  })
+  .finally(done);
+
+// Yellowstone hunt unit boundary (Utah DWR)
+fetch("https://dwrmapserv.utah.gov/dwrarcgis/rest/services/hunt/Boundaries_and_Tables_for_HuntP/FeatureServer/0/query?where=Boundary_Name+LIKE+'%25Yellowstone%25'&outFields=*&outSR=4326&f=geojson")
+  .then(r=>r.json())
+  .then(data=>{
+    if(!data.features || !data.features.length) throw new Error('no features');
+    huntLayer = L.geoJSON(data, {
+      style:{color:'#a8431f', weight:2.5, fill:true, fillOpacity:0.05, dashArray:'6 4'}
+    });
+    huntLayer.eachLayer(l=>l.bindPopup('<b>'+ (l.feature.properties.Boundary_Name||'Yellowstone Unit') +'</b><br>' + (l.feature.properties.Description||'')));
+    if(document.getElementById('toggle-hunt').checked) huntLayer.addTo(map);
+    document.getElementById('status-hunt').textContent = 'loaded from Utah DWR';
+    document.getElementById('status-hunt').className = 'status ok';
+    kickRoadsLoad();
+    kickDisturbanceLoad();
+  })
+  .catch(err=>{
+    document.getElementById('status-hunt').textContent = 'could not load (' + err.message + ')';
+    document.getElementById('status-hunt').className = 'status err';
+  })
+  .finally(done);
+
+document.getElementById('toggle-ashley').addEventListener('change', e=>{ if(!ashleyLayer) return; e.target.checked ? ashleyLayer.addTo(map) : map.removeLayer(ashleyLayer); });
+document.getElementById('toggle-hunt').addEventListener('change', e=>{ if(!huntLayer) return; e.target.checked ? huntLayer.addTo(map) : map.removeLayer(huntLayer); });
+
+// ---- Slope / Aspect (USGS 3DEP elevation, rendered on the fly) ----
+const ELEV_URL = 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer';
+const slopeLayer = new ImageServerTileLayer(ELEV_URL, {maxZoom:15, opacity:0.6, renderingRule:{rasterFunction:'Slope Map'}});
+const aspectLayer = new ImageServerTileLayer(ELEV_URL, {maxZoom:15, opacity:0.6, renderingRule:{rasterFunction:'Aspect Map'}});
+document.getElementById('toggle-slope').addEventListener('change', e=>{
+  if(e.target.checked){ document.getElementById('toggle-aspect').checked=false; map.removeLayer(aspectLayer); slopeLayer.addTo(map); }
+  else map.removeLayer(slopeLayer);
+});
+document.getElementById('toggle-aspect').addEventListener('change', e=>{
+  if(e.target.checked){ document.getElementById('toggle-slope').checked=false; map.removeLayer(slopeLayer); aspectLayer.addTo(map); }
+  else map.removeLayer(aspectLayer);
+});
+
+// ---- Vegetation (LANDFIRE) ----
+const evtLayer = new ImageServerTileLayer('https://apps.fs.usda.gov/fsgisx01/rest/services/RDW_Landfire/US_ExistingVegType/ImageServer', {maxZoom:15, opacity:0.65});
+const evcLayer = new ImageServerTileLayer('https://apps.fs.usda.gov/fsgisx01/rest/services/RDW_Landfire/US_ExistingVegCover_v140/ImageServer', {maxZoom:15, opacity:0.65});
+document.getElementById('toggle-evt').addEventListener('change', e=>{
+  if(e.target.checked){ document.getElementById('toggle-evc').checked=false; map.removeLayer(evcLayer); evtLayer.addTo(map); }
+  else map.removeLayer(evtLayer);
+});
+document.getElementById('toggle-evc').addEventListener('change', e=>{
+  if(e.target.checked){ document.getElementById('toggle-evt').checked=false; map.removeLayer(evtLayer); evcLayer.addTo(map); }
+  else map.removeLayer(evcLayer);
+});
+
+// ---- Roads & Trails (USFS EDW) ----
+let roadsLayer, trailsLayer, roadsFC=null, trailsFC=null;
+const statusRoads = document.getElementById('status-roads');
+
+function bboxParam(b){ return b.getWest()+','+b.getSouth()+','+b.getEast()+','+b.getNorth(); }
+
+async function fetchAllFeatures(baseUrl, bbox){
+  let all = [], offset = 0;
+  for(let i=0;i<6;i++){
+    const url = baseUrl + "/query?geometry=" + encodeURIComponent(bbox) +
+      "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects" +
+      "&outFields=*&outSR=4326&resultOffset=" + offset + "&resultRecordCount=1000&f=geojson";
+    const r = await fetch(url);
+    const d = await r.json();
+    if(!d.features || !d.features.length) break;
+    all = all.concat(d.features);
+    if(d.features.length < 1000) break;
+    offset += 1000;
+  }
+  return all;
+}
+
+async function loadRoadsAndTrails(bounds){
+  statusRoads.textContent = 'loading roads & trails…';
+  statusRoads.className = 'status';
+  const bbox = bboxParam(bounds);
+  try{
+    const [roadFeats, trailFeats] = await Promise.all([
+      fetchAllFeatures('https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_RoadBasic_01/MapServer/0', bbox),
+      fetchAllFeatures('https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_TrailNFSPublish_01/MapServer/0', bbox)
+    ]);
+    roadsFC = {type:'FeatureCollection', features:roadFeats};
+    trailsFC = {type:'FeatureCollection', features:trailFeats};
+
+    roadsLayer = L.geoJSON(roadsFC, {style:{color:'#9b6f3f', weight:1.4, opacity:0.85}});
+    trailsLayer = L.geoJSON(trailsFC, {style:{color:'#5a8fae', weight:1.2, opacity:0.85, dashArray:'3 3'}});
+    if(document.getElementById('toggle-roads').checked) roadsLayer.addTo(map);
+    if(document.getElementById('toggle-trails').checked) trailsLayer.addTo(map);
+
+    statusRoads.textContent = roadFeats.length + ' road segments, ' + trailFeats.length + ' trail segments loaded';
+    statusRoads.className = 'status ok';
+  }catch(err){
+    statusRoads.textContent = 'could not load roads/trails (' + err.message + ')';
+    statusRoads.className = 'status err';
+  }
+}
+
+document.getElementById('toggle-roads').addEventListener('change', e=>{ if(!roadsLayer) return; e.target.checked ? roadsLayer.addTo(map) : map.removeLayer(roadsLayer); });
+document.getElementById('toggle-trails').addEventListener('change', e=>{ if(!trailsLayer) return; e.target.checked ? trailsLayer.addTo(map) : map.removeLayer(trailsLayer); });
+
+// Kick off roads/trails load once the hunt unit boundary is known (fallback to map view bounds after 4s)
+let roadsKicked = false;
+function kickRoadsLoad(){
+  if(roadsKicked) return; roadsKicked = true;
+  const bounds = huntLayer ? huntLayer.getBounds().pad(0.05) : map.getBounds();
+  loadRoadsAndTrails(bounds);
+}
+setTimeout(kickRoadsLoad, 3500);
+
+// ---- 1-mile remote zone (turf.js, computed client-side on demand) ----
+let remoteLayer = null;
+document.getElementById('btn-remote').addEventListener('click', async ()=>{
+  const statusRemote = document.getElementById('status-remote');
+  if(!roadsFC || !trailsFC){ statusRemote.textContent='waiting on roads/trails to finish loading…'; statusRemote.className='status'; return; }
+  if(!huntLayer){ statusRemote.textContent='hunt unit boundary not loaded yet'; statusRemote.className='status err'; return; }
+  statusRemote.textContent = 'computing 1-mile buffer… this can take a few seconds';
+  statusRemote.className = 'status';
+  await new Promise(r=>setTimeout(r, 30)); // let UI paint
+  try{
+    const lines = roadsFC.features.concat(trailsFC.features).filter(f=>f.geometry);
+    if(!lines.length) throw new Error('no road/trail geometry in this area');
+    const combined = combineLines(lines);
+    if(!combined) throw new Error('road/trail geometry could not be combined');
+    const buffered = turf.buffer(combined, 1, {units:'miles'});
+    // union hunt-unit polygon(s) into one AOI
+    let aoi = huntLayer.toGeoJSON();
+    if(aoi.type==='FeatureCollection') aoi = aoi.features.reduce((a,b)=> a? turf.union(a,b) : b, null);
+    const remote = turf.difference(aoi, buffered);
+    if(remoteLayer) map.removeLayer(remoteLayer);
+    if(!remote){ statusRemote.textContent='no area is >1 mile from a road or trail here'; statusRemote.className='status'; return; }
+    remoteLayer = L.geoJSON(remote, {style:{color:'#7a4fae', weight:1, fillColor:'#7a4fae', fillOpacity:0.35}});
+    remoteLayer.addTo(map);
+    document.getElementById('row-remote').style.display = 'flex';
+    document.getElementById('toggle-remote').checked = true;
+    const acres = turf.area(remote) / 4046.86;
+    statusRemote.textContent = 'done — ' + Math.round(acres).toLocaleString() + ' acres are >1 mi from all mapped roads/trails';
+    statusRemote.className = 'status ok';
+  }catch(err){
+    statusRemote.textContent = 'computation failed (' + err.message + ')';
+    statusRemote.className = 'status err';
+  }
+});
+document.getElementById('toggle-remote').addEventListener('change', e=>{ if(!remoteLayer) return; e.target.checked ? remoteLayer.addTo(map) : map.removeLayer(remoteLayer); });
+
+// ---- Disturbance history: fire perimeters + timber harvest ----
+let fireLayer, loggingLayer;
+const statusDist = document.getElementById('status-disturbance');
+
+async function loadFire(bounds){
+  const bbox = bboxParam(bounds);
+  try{
+    const feats = await fetchAllFeatures('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/InterAgencyFirePerimeterHistory_All_Years_View/FeatureServer/0', bbox);
+    fireLayer = L.geoJSON({type:'FeatureCollection',features:feats}, {
+      style:{color:'#c25b3f', weight:1.5, fillColor:'#c25b3f', fillOpacity:0.15}
+    });
+    fireLayer.eachLayer(l=>{
+      const p = l.feature.properties;
+      l.bindPopup('<b>'+(p.INCIDENT||p.incident||'Fire')+'</b><br>Year: '+(p.FIRE_YEAR||p.FireYear||p.fire_year||'unknown'));
+    });
+    if(document.getElementById('toggle-fire').checked) fireLayer.addTo(map);
+    statusDist.textContent = feats.length + ' fire perimeters loaded';
+    statusDist.className = 'status ok';
+  }catch(err){
+    statusDist.textContent = 'fire history failed to load (' + err.message + ')';
+    statusDist.className = 'status err';
+  }
+}
+
+async function loadLogging(bounds){
+  const bbox = bboxParam(bounds);
+  try{
+    const feats = await fetchAllFeatures('https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_TimberHarvest_01/MapServer/8', bbox);
+    loggingLayer = L.geoJSON({type:'FeatureCollection',features:feats}, {
+      style:{color:'#8a6a3a', weight:1.2, fillColor:'#8a6a3a', fillOpacity:0.12}
+    });
+    loggingLayer.eachLayer(l=>{
+      const p = l.feature.properties;
+      l.bindPopup('<b>Timber Harvest</b><br>'+(p.GIS_ACRES?Math.round(p.GIS_ACRES)+' acres':''));
+    });
+    if(document.getElementById('toggle-logging').checked) loggingLayer.addTo(map);
+    statusDist.textContent = (statusDist.textContent ? statusDist.textContent + ' · ' : '') + feats.length + ' timber harvest units loaded';
+    statusDist.className = 'status ok';
+  }catch(err){
+    statusDist.textContent = 'timber harvest failed to load (' + err.message + ')';
+    statusDist.className = 'status err';
+  }
+}
+
+document.getElementById('toggle-fire').addEventListener('change', e=>{ if(!fireLayer) return; e.target.checked ? fireLayer.addTo(map) : map.removeLayer(fireLayer); });
+document.getElementById('toggle-logging').addEventListener('change', e=>{ if(!loggingLayer) return; e.target.checked ? loggingLayer.addTo(map) : map.removeLayer(loggingLayer); });
+
+let disturbanceKicked = false;
+function kickDisturbanceLoad(){
+  if(disturbanceKicked) return; disturbanceKicked = true;
+  const bounds = huntLayer ? huntLayer.getBounds().pad(0.05) : map.getBounds();
+  statusDist.textContent = 'loading…';
+  loadFire(bounds);
+  loadLogging(bounds);
+}
+setTimeout(kickDisturbanceLoad, 4000);
+
+// ---- Water proximity (0.5 mi buffer around NHD streams/water bodies) ----
+let waterZoneLayer = null, waterLinesFC = null;
+document.getElementById('btn-water').addEventListener('click', async ()=>{
+  const statusWater = document.getElementById('status-water');
+  if(!huntLayer){ statusWater.textContent='hunt unit boundary not loaded yet'; statusWater.className='status err'; return; }
+  statusWater.textContent = 'fetching streams & computing buffer…';
+  statusWater.className = 'status';
+  await new Promise(r=>setTimeout(r,30));
+  try{
+    if(!waterLinesFC){
+      const bounds = huntLayer.getBounds().pad(0.05);
+      const bbox = bboxParam(bounds);
+      const feats = await fetchAllFeatures('https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/6', bbox);
+      waterLinesFC = {type:'FeatureCollection', features: feats.filter(f=>f.geometry)};
+    }
+    if(!waterLinesFC.features.length) throw new Error('no stream data in this area');
+    const combined = combineLines(waterLinesFC.features);
+    if(!combined) throw new Error('stream geometry could not be combined');
+    const buffered = turf.buffer(combined, 0.5, {units:'miles'});
+    let aoi = huntLayer.toGeoJSON();
+    if(aoi.type==='FeatureCollection') aoi = aoi.features.reduce((a,b)=> a? turf.union(a,b) : b, null);
+    const clipped = turf.intersect(aoi, buffered);
+    if(waterZoneLayer) map.removeLayer(waterZoneLayer);
+    if(!clipped){ statusWater.textContent='no water proximity zone found'; statusWater.className='status'; return; }
+    waterZoneLayer = L.geoJSON(clipped, {style:{color:'#3f7ba8', weight:1, fillColor:'#3f7ba8', fillOpacity:0.3}});
+    waterZoneLayer.addTo(map);
+    document.getElementById('row-water').style.display = 'flex';
+    document.getElementById('toggle-waterzone').checked = true;
+    const acres = turf.area(clipped) / 4046.86;
+    statusWater.textContent = 'done — ' + Math.round(acres).toLocaleString() + ' acres within 0.5 mi of mapped water';
+    statusWater.className = 'status ok';
+  }catch(err){
+    statusWater.textContent = 'computation failed (' + err.message + ')';
+    statusWater.className = 'status err';
+  }
+});
+document.getElementById('toggle-waterzone').addEventListener('change', e=>{ if(!waterZoneLayer) return; e.target.checked ? waterZoneLayer.addTo(map) : map.removeLayer(waterZoneLayer); });
+
+// ---- Drought / moisture context (US Drought Monitor, county-level) ----
+// Yellowstone unit sits mainly in Duchesne (FIPS 49013) & Uintah (49047) counties, UT.
+let droughtCategory = null; // 0=none/wet ... 4=exceptional drought
+(async function loadDrought(){
+  const el = document.getElementById('status-drought');
+  try{
+    const end = new Date();
+    const start = new Date(end.getTime() - 7*86400000);
+    const fmt = d => (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();
+    const url = 'https://usdmdataservices.unl.edu/api/CountyStatistics/GetDroughtSeverityStatisticsByAreaPercent?aoi=49013&startdate='+fmt(start)+'&enddate='+fmt(end)+'&statisticsType=1';
+    const r = await fetch(url);
+    const d = await r.json();
+    if(!d || !d.length) throw new Error('no data');
+    const latest = d[d.length-1];
+    // find highest category with meaningful coverage (>20%)
+    const cats = ['D0','D1','D2','D3','D4'];
+    let cat = -1;
+    cats.forEach((c,i)=>{ if(parseFloat(latest[c]||0) > 20) cat = i; });
+    droughtCategory = cat;
+    const labels = ['Abnormally Dry','Moderate Drought','Severe Drought','Extreme Drought','Exceptional Drought'];
+    el.textContent = cat<0 ? 'Duchesne Co: no significant drought — normal/wet' : 'Duchesne Co: '+labels[cat]+' — biasing recommendations toward '+(cat<=1?'mid-elevation':'higher, moister elevations is less reliable this dry; favoring mid-elevation drainages')+' ';
+    el.className = 'status ok';
+  }catch(err){
+    el.textContent = 'live drought data unavailable — assuming average conditions (no elevation bias applied)';
+    el.className = 'status err';
+  }
+})();
+
+// ============================================================
+// ELK RECOMMENDATION ENGINE
+// ============================================================
+const btnAnalyze = document.getElementById('btn-analyze');
+const statusAnalysis = document.getElementById('status-analysis');
+const resultsPanel = document.getElementById('results-panel');
+const resultsBody = document.getElementById('results-body');
+document.getElementById('close-results').addEventListener('click', ()=> resultsPanel.style.display='none');
+
+let recMarkersLayer = L.layerGroup().addTo(map);
+
+function toRad(d){ return d*Math.PI/180; }
+function toDeg(r){ return r*180/Math.PI; }
+
+async function getElevationFt(lon, lat){
+  const url = 'https://epqs.nationalmap.gov/v1/json?x='+lon+'&y='+lat+'&units=Meters&wkid=4326&includeDate=false';
+  const r = await fetch(url);
+  const d = await r.json();
+  const m = parseFloat(d.value !== undefined ? d.value : (d.USGS_Elevation_Point_Query_Service && d.USGS_Elevation_Point_Query_Service.Elevation_Query.Elevation));
+  return m; // meters
+}
+
+async function getCanopyPct(lon, lat){
+  const url = 'https://apps.fs.usda.gov/fsgisx01/rest/services/RDW_Landfire/US_ExistingVegCover_v140/ImageServer/identify?geometry='+lon+','+lat+'&geometryType=esriGeometryPoint&sr=4326&returnGeometry=false&f=json';
+  const r = await fetch(url);
+  const d = await r.json();
+  const v = parseFloat(d.value);
+  return isNaN(v) ? null : v;
+}
+
+// simple concurrency-limited pool
+async function pool(items, worker, limit){
+  const results = new Array(items.length);
+  let idx = 0;
+  async function run(){
+    while(idx < items.length){
+      const i = idx++;
+      try{ results[i] = await worker(items[i], i); }catch(e){ results[i] = null; }
+    }
+  }
+  await Promise.all(new Array(limit).fill(0).map(run));
+  return results;
+}
+
+function classifyCanopy(pct){
+  if(pct===null) return 'unknown';
+  if(pct < 10) return 'open';
+  if(pct < 40) return 'light';
+  return 'dark';
+}
+
+btnAnalyze.addEventListener('click', async ()=>{
+  if(!huntLayer){ statusAnalysis.textContent='hunt boundary not loaded yet'; statusAnalysis.className='status err'; return; }
+  if(!roadsFC || !trailsFC){ statusAnalysis.textContent='waiting on roads/trails to finish loading — try again in a few seconds'; statusAnalysis.className='status err'; return; }
+  btnAnalyze.disabled = true;
+  statusAnalysis.className = 'status';
+  recMarkersLayer.clearLayers();
+
+  try{
+    // ensure water lines are loaded
+    if(!waterLinesFC){
+      statusAnalysis.textContent = 'fetching stream data…';
+      const bounds = huntLayer.getBounds().pad(0.05);
+      const feats = await fetchAllFeatures('https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/6', bboxParam(bounds));
+      waterLinesFC = {type:'FeatureCollection', features: feats.filter(f=>f.geometry)};
+    }
+
+    let aoi = huntLayer.toGeoJSON();
+    if(aoi.type==='FeatureCollection') aoi = aoi.features.reduce((a,b)=> a? turf.union(a,b) : b, null);
+
+    // combined lines for fast distance checks (no API calls)
+    const roadTrailLines = combineLines(roadsFC.features.concat(trailsFC.features));
+    if(!roadTrailLines) throw new Error('road/trail geometry could not be combined');
+    const waterLines = waterLinesFC.features.length ? combineLines(waterLinesFC.features) : null;
+    let disturbanceLines = null;
+    const distFeats = [];
+    if(fireLayer) fireLayer.eachLayer(l=>distFeats.push(l.feature));
+    if(loggingLayer) loggingLayer.eachLayer(l=>distFeats.push(l.feature));
+    if(distFeats.length){
+      try{ disturbanceLines = combineLines(normalizePolygonsToLines(distFeats)); }catch(e){ disturbanceLines = null; }
+    }
+
+    // build grid
+    const areaSqMi = turf.area(aoi) / 2589988.11;
+    let cellSide = Math.sqrt(areaSqMi / 100);
+    cellSide = Math.min(Math.max(cellSide, 0.25), 1.0);
+    const bbox = turf.bbox(aoi);
+    let grid = turf.pointGrid(bbox, cellSide, {units:'miles', mask: aoi});
+    let points = grid.features;
+    if(points.length > 130) points = points.slice(0, 130); // hard cap for runtime
+    if(points.length < 8) throw new Error('unit too small for grid at this resolution');
+
+    statusAnalysis.textContent = 'analyzing '+points.length+' candidate points… (elevation + vegetation queries)';
+
+    // pre-filter: keep only points >= 1 mile from every road/trail (hard constraint from user)
+    let candidates = points.map(p=>{
+      const distRoad = turf.pointToLineDistance(p, roadTrailLines, {units:'miles'});
+      return {coords:p.geometry.coordinates, distRoad};
+    }).filter(c => c.distRoad >= 1.0);
+
+    if(candidates.length < 6){
+      statusAnalysis.textContent = 'fewer than 6 points are >=1mi from roads/trails at this resolution — relaxing to top-remote points instead';
+      candidates = points.map(p=>{
+        const distRoad = turf.pointToLineDistance(p, roadTrailLines, {units:'miles'});
+        return {coords:p.geometry.coordinates, distRoad};
+      }).sort((a,b)=>b.distRoad-a.distRoad).slice(0, 40);
+    }
+
+    // enrich each candidate with terrain + vegetation data
+    const enriched = await pool(candidates, async (c)=>{
+      const [lon, lat] = c.coords;
+      const off = 0.06; // ~100m offset for finite-difference slope/aspect
+      const eastPt = turf.destination([lon,lat], off, 90, {units:'miles'}).geometry.coordinates;
+      const northPt = turf.destination([lon,lat], off, 0, {units:'miles'}).geometry.coordinates;
+
+      const [elevC, elevE, elevN, evcC, evcE, evcN] = await Promise.all([
+        getElevationFt(lon, lat), getElevationFt(eastPt[0], eastPt[1]), getElevationFt(northPt[0], northPt[1]),
+        getCanopyPct(lon, lat), getCanopyPct(eastPt[0], eastPt[1]), getCanopyPct(northPt[0], northPt[1])
+      ]);
+
+      const dx = off*1609.34; // miles->meters
+      let slopeDeg = 0, aspectDeg = null;
+      if(elevC!=null && elevE!=null && elevN!=null){
+        const dzdx = (elevE - elevC)/dx;
+        const dzdy = (elevN - elevC)/dx;
+        slopeDeg = toDeg(Math.atan(Math.sqrt(dzdx*dzdx+dzdy*dzdy)));
+        if(slopeDeg > 1.5){
+          let a = toDeg(Math.atan2(dzdx, dzdy));
+          aspectDeg = (a + 360) % 360; // 0=N
+        }
+      }
+      const pt = turf.point([lon,lat]);
+      const distWater = waterLines ? turf.pointToLineDistance(pt, waterLines, {units:'miles'}) : 99;
+      const distDisturb = disturbanceLines ? turf.pointToLineDistance(pt, disturbanceLines, {units:'miles'}) : 99;
+      const canopyClass = classifyCanopy(evcC);
+      const neighborClasses = [classifyCanopy(evcE), classifyCanopy(evcN)];
+      const isEdge = neighborClasses.some(nc => nc !== 'unknown' && nc !== canopyClass);
+
+      return {
+        lon, lat, distRoad: c.distRoad, distWater, distDisturb,
+        elevFt: elevC!=null ? elevC*3.28084 : null,
+        slopeDeg, aspectDeg, canopyPct: evcC, canopyClass, isEdge
+      };
+    }, 6);
+
+    let valid = enriched.filter(p => p && p.elevFt!=null);
+    if(!valid.length) throw new Error('terrain services returned no usable data for this area');
+
+    // elevation band preference from drought context
+    const elevs = valid.map(p=>p.elevFt).sort((a,b)=>a-b);
+    const pct = q => elevs[Math.floor(q*(elevs.length-1))];
+    let bandLow, bandHigh;
+    if(droughtCategory!==null && droughtCategory<=1){ bandLow=pct(0.55); bandHigh=pct(0.95); } // near-normal/mild -> upper elevations ok
+    else if(droughtCategory!==null && droughtCategory>=2){ bandLow=pct(0.25); bandHigh=pct(0.65); } // dry -> mid elevation
+    else { bandLow=pct(0.35); bandHigh=pct(0.8); } // unknown -> broad mid-upper default
+    function elevBandScore(ft){
+      if(ft>=bandLow && ft<=bandHigh) return 1;
+      const d = ft<bandLow ? bandLow-ft : ft-bandHigh;
+      return Math.max(0, 1 - d/600);
+    }
+
+    // local relief (vantage) score: elevation vs mean of points within 0.5mi
+    valid.forEach(p=>{
+      const pt = turf.point([p.lon,p.lat]);
+      let sum=0, n=0;
+      valid.forEach(q=>{
+        if(q===p) return;
+        const d = turf.distance(pt, turf.point([q.lon,q.lat]), {units:'miles'});
+        if(d<=0.6){ sum+=q.elevFt; n++; }
+      });
+      p.relief = n>0 ? p.elevFt - (sum/n) : 0;
+    });
+    const maxRelief = Math.max(1, ...valid.map(p=>Math.abs(p.relief)));
+
+    const clamp01 = x => Math.max(0, Math.min(1, x));
+    const tri = (x, lo, peak, hi) => x<=lo||x>=hi ? 0 : (x<peak ? (x-lo)/(peak-lo) : 1-(x-peak)/(hi-peak));
+
+    valid.forEach(p=>{
+      p.vantageScore = clamp01(p.relief/maxRelief*1.3 + 0.15);
+      p.canopyOpenScore = p.canopyClass==='open'?1:(p.canopyClass==='light'?0.5:0);
+      p.canopyDarkScore = p.canopyClass==='dark'?1:(p.canopyClass==='light'?0.5:0);
+      p.edgeScore = p.isEdge ? 1 : 0.15;
+      p.waterScore = clamp01(1 - p.distWater/1.2);
+      p.disturbEdgeScore = p.distDisturb<=0.3 ? clamp01(1-p.distDisturb/0.3) : 0;
+      let north = 0;
+      if(p.aspectDeg!=null){ north = clamp01(Math.cos(toRad(p.aspectDeg-25))*0.6+0.4); } else { north = 0.4; }
+      p.aspectScore = north;
+      p.steepScore = tri(p.slopeDeg, 12, 32, 55);
+      p.moderateSlopeScore = tri(p.slopeDeg, 3, 14, 28);
+      p.remoteBonus = clamp01((p.distRoad-1)/1.5);
+      p.elevScore = elevBandScore(p.elevFt);
+
+      p.scoreGlass   = 0.35*p.vantageScore + 0.25*p.canopyOpenScore + 0.15*p.edgeScore + 0.15*p.elevScore + 0.10*p.moderateSlopeScore;
+      p.scoreFirst   = 0.28*p.edgeScore + 0.22*p.canopyOpenScore + 0.2*p.waterScore + 0.15*p.elevScore + 0.15*p.aspectScore;
+      p.scoreLast    = 0.28*p.edgeScore + 0.22*p.canopyDarkScore + 0.2*p.waterScore + 0.15*p.elevScore + 0.15*p.aspectScore;
+      p.scoreMidday  = 0.3*p.canopyDarkScore + 0.25*p.steepScore + 0.2*p.remoteBonus + 0.15*p.aspectScore + 0.1*p.disturbEdgeScore;
+      p.scoreBugle   = 0.35*p.remoteBonus + 0.3*p.vantageScore + 0.2*p.waterScore + 0.15*p.disturbEdgeScore;
+    });
+
+    function topN(key, n){
+      return valid.slice().sort((a,b)=>b[key]-a[key]).slice(0,n);
+    }
+    const cats = [
+      {key:'scoreGlass', label:'Glassing — AM/PM vantage points', color:'#e8b84a', icon:'G'},
+      {key:'scoreFirst', label:'First Light', color:'#e8734a', icon:'1'},
+      {key:'scoreLast', label:'Last Light', color:'#a84ae8', icon:'2'},
+      {key:'scoreMidday', label:'Midday — bedding/thick cover', color:'#4a7de8', icon:'M'},
+      {key:'scoreBugle', label:'Midnight–3AM Locator Bugles', color:'#4ae8a0', icon:'B'},
+    ];
+
+    // Top 3 overall areas: cluster the union of all top-8 points per category by composite frequency+score
+    const pool8 = [];
+    cats.forEach(c => topN(c.key,8).forEach(p => pool8.push({p, cat:c.key})));
+    // aggregate per unique point (by rounded coord)
+    const agg = {};
+    pool8.forEach(({p,cat})=>{
+      const k = p.lon.toFixed(4)+','+p.lat.toFixed(4);
+      if(!agg[k]) agg[k] = {p, cats:new Set(), total:0};
+      agg[k].cats.add(cat);
+      agg[k].total += p[cat];
+    });
+    let aggPoints = Object.values(agg);
+    // cluster within 0.6 mi
+    const clusters = [];
+    aggPoints.sort((a,b)=>b.total-a.total || b.cats.size-a.cats.size);
+    aggPoints.forEach(item=>{
+      let placed = false;
+      for(const cl of clusters){
+        const d = turf.distance(turf.point([item.p.lon,item.p.lat]), turf.point([cl.center.lon,cl.center.lat]), {units:'miles'});
+        if(d <= 0.6){
+          cl.members.push(item); cl.score += item.total; item.cats.forEach(c=>cl.catSet.add(c));
+          placed = true; break;
+        }
+      }
+      if(!placed) clusters.push({center:item.p, members:[item], score:item.total, catSet:new Set(item.cats)});
+    });
+    clusters.sort((a,b)=> (b.catSet.size - a.catSet.size) || (b.score - a.score));
+    const top3Areas = clusters.slice(0,3);
+
+    // ---- render markers ----
+    cats.forEach(c=>{
+      topN(c.key,5).forEach((p,i)=>{
+        const marker = L.circleMarker([p.lat,p.lon], {radius:6, color:c.color, weight:2, fillColor:c.color, fillOpacity:0.7})
+          .bindPopup('<b>'+c.icon+(i+1)+' — '+c.label+'</b><br>'+p.lat.toFixed(4)+', '+p.lon.toFixed(4)+
+            '<br>Elev: '+Math.round(p.elevFt)+' ft · Slope: '+p.slopeDeg.toFixed(0)+'° · '+
+            (p.aspectDeg!=null? 'Aspect: '+p.aspectDeg.toFixed(0)+'°':'Aspect: flat')+
+            '<br>Canopy: '+p.canopyClass+(p.isEdge?' (edge)':'')+' · '+p.distRoad.toFixed(2)+' mi from roads/trails · '+p.distWater.toFixed(2)+' mi from water');
+        recMarkersLayer.addLayer(marker);
+      });
+    });
+    top3Areas.forEach((cl,i)=>{
+      L.circle([cl.center.lat, cl.center.lon], {radius:900, color:'#ffffff', weight:2, dashArray:'4 4', fillOpacity:0.05})
+        .bindPopup('<b>Top Area #'+(i+1)+'</b><br>Covers: '+Array.from(cl.catSet).length+' of 5 activity types')
+        .addTo(recMarkersLayer);
+    });
+
+    // ---- render results panel ----
+    let html = '<div style="margin-bottom:14px;padding:10px;background:#22291b;border:1px solid #e8b84a;">';
+    html += '<strong style="color:#fff;">TOP 3 AREAS — Sep 11–16</strong><br><span style="color:#9a9a86;font-size:10px;">Ranked by how many of the 5 activity categories overlap there.</span>';
+    top3Areas.forEach((cl,i)=>{
+      html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #3a4230;">';
+      html += '<b>#'+(i+1)+' — '+cl.center.lat.toFixed(4)+', '+cl.center.lon.toFixed(4)+'</b><br>';
+      html += '<span style="color:#9a9a86;">Elev '+Math.round(cl.center.elevFt)+'ft · '+cl.center.distRoad.toFixed(1)+'mi off road · covers: ';
+      html += Array.from(cl.catSet).map(k=>cats.find(c=>c.key===k).icon).join(' ') + '</span></div>';
+    });
+    html += '</div>';
+
+    cats.forEach(c=>{
+      html += '<div style="margin-bottom:14px;">';
+      html += '<strong style="color:'+c.color+';">'+c.icon+' '+c.label+'</strong>';
+      topN(c.key,5).forEach((p,i)=>{
+        html += '<div style="margin-top:6px;padding-left:6px;border-left:2px solid '+c.color+';font-size:11px;">';
+        html += (i+1)+'. '+p.lat.toFixed(4)+', '+p.lon.toFixed(4)+' — '+Math.round(p.elevFt)+'ft, '+p.slopeDeg.toFixed(0)+'° slope, '+p.canopyClass+(p.isEdge?' edge':'')+', '+p.distRoad.toFixed(1)+'mi off road';
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    html += '<div style="color:#7a7a68;font-size:10px;margin-top:8px;">Heuristic scoring from live USGS/USFS/LANDFIRE data — a starting point for scouting, not a guarantee elk are present.</div>';
+
+    resultsBody.innerHTML = html;
+    resultsPanel.style.display = 'block';
+    statusAnalysis.textContent = 'done — analyzed '+valid.length+' points, '+candidates.length+' were ≥1mi from roads/trails';
+    statusAnalysis.className = 'status ok';
+    map.fitBounds(huntLayer.getBounds(), {padding:[20,20]});
+  }catch(err){
+    statusAnalysis.textContent = 'analysis failed: ' + err.message;
+    statusAnalysis.className = 'status err';
+  }finally{
+    btnAnalyze.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
