@@ -269,7 +269,7 @@ async function getCanopyClass(lon, lat){
   // canopy % service (apps.fs.usda.gov/fsgisx01/...) doesn't send CORS
   // headers, unlike the EDW roads/trails endpoint on the same domain —
   // different backend server, different config — so it fails silently.
-  const url = 'https://tiledimageservices.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/Esri_2020_Land_Cover_V2/ImageServer/identify?geometry='+lon+','+lat+'&geometryType=esriGeometryPoint&sr=4326&returnGeometry=false&f=json';
+  const url = 'https://tiledimageservices.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/Esri_2020_Land_Cover_V2/ImageServer/identify?geometry='+lon+','+lat+'&geometryType=esriGeometryPoint&sr=4326&returnGeometry=false&f=json&token=AAPTaUV2QJS5nKZOQtTnMqu01eQ..7ZDXhXnE2N61pROx1kcoWwVmfboAUtIlhWqMaJtxurmVq5nSPRPs-MLM1o0oKpV4sJ6JV7U5erqXQTpA0yCsM0p87TEB4LBslrN-OHds1cX-GRxAPJqRTBuKqOH6LPUU7T1gBOMJXcOEe6JMwysjPyAZI6Uy0KYXGNDCx3eABcEH9LxrGzxwa0IM1ZLKfAqjw6S55O4JmdBJYl8vpvsjFCCHmtuuS2bRMVzi9wgiKg9nlxInsMGDNo9X2qdHAT1_Td7LVfBQ';
   const r = await fetch(url);
   if(!r.ok) throw new Error('landcover HTTP '+r.status);
   const d = await r.json();
